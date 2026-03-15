@@ -1,0 +1,12 @@
+{
+  "scene_id": "intro_alley",
+  "title": "霓虹酒馆外",
+  "start_node": "line_001",
+  "nodes": {
+    "line_001": {
+      "type": "dialogue",
+      "speaker": "Mira",
+      "text": "欢迎来到霓虹酒馆，陌生人。今晚你看起来像是在找答案。"
+    }
+  }
+}
