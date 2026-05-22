@@ -1,0 +1,193 @@
+name: Build Claude Code Linux x64 offline package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Claude Code version or channel to download, for example stable, latest, or 2.1.89"
+        required: true
+        default: "stable"
+      platform:
+        description: "Target platform"
+        required: true
+        default: "linux-x64"
+        type: choice
+        options:
+          - linux-x64
+
+jobs:
+  build-offline-package:
+    name: Build offline package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Install verification tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg jq coreutils tar
+
+      - name: Download, verify, and package Claude Code
+        id: package
+        shell: bash
+        env:
+          REPO: https://downloads.claude.ai/claude-code-releases
+          KEY_URL: https://downloads.claude.ai/keys/claude-code.asc
+          EXPECTED_FINGERPRINT: "31DD DE24 DDFA B679 F42D 7BD2 BAA9 29FF 1A7E CACE"
+          VERSION_INPUT: ${{ inputs.version }}
+          PLATFORM: ${{ inputs.platform }}
+        run: |
+          set -euo pipefail
+
+          WORKDIR="$PWD/work"
+          OUTDIR="$PWD/out"
+          mkdir -p "$WORKDIR" "$OUTDIR"
+          cd "$WORKDIR"
+
+          echo "==> Import Anthropic Claude Code release signing key"
+          curl -fsSL "$KEY_URL" -o claude-code.asc
+          gpg --import claude-code.asc
+
+          ACTUAL_FINGERPRINT="$(gpg --fingerprint --with-colons security@anthropic.com | awk -F: '/^fpr:/ {print $10; exit}')"
+          EXPECTED_COMPACT="$(printf '%s' "$EXPECTED_FINGERPRINT" | tr -d ' ')"
+
+          echo "Expected fingerprint: $EXPECTED_COMPACT"
+          echo "Actual fingerprint:   $ACTUAL_FINGERPRINT"
+          test "$ACTUAL_FINGERPRINT" = "$EXPECTED_COMPACT"
+
+          echo "==> Install Claude Code with official native installer: $VERSION_INPUT"
+          curl -fsSL https://claude.ai/install.sh -o install.sh
+          bash install.sh "$VERSION_INPUT"
+
+          CLAUDE_BIN="${HOME}/.local/bin/claude"
+          if [ ! -x "$CLAUDE_BIN" ]; then
+            echo "Could not find executable at $CLAUDE_BIN" >&2
+            exit 1
+          fi
+
+          RESOLVED_BIN="$(readlink -f "$CLAUDE_BIN")"
+
+          echo "Claude executable: $CLAUDE_BIN"
+          echo "Resolved binary:   $RESOLVED_BIN"
+
+          CLAUDE_VERSION_RAW="$($CLAUDE_BIN --version || true)"
+          echo "claude --version: $CLAUDE_VERSION_RAW"
+
+          ACTUAL_VERSION="$(printf '%s\n' "$CLAUDE_VERSION_RAW" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          if [ -z "$ACTUAL_VERSION" ]; then
+            echo "Could not parse Claude Code version from: $CLAUDE_VERSION_RAW" >&2
+            exit 1
+          fi
+
+          echo "Actual installed version: $ACTUAL_VERSION"
+
+          echo "==> Download manifest and detached signature for $ACTUAL_VERSION"
+          curl -fsSLO "$REPO/$ACTUAL_VERSION/manifest.json"
+          curl -fsSLO "$REPO/$ACTUAL_VERSION/manifest.json.sig"
+
+          echo "==> Verify manifest signature"
+          gpg --verify manifest.json.sig manifest.json
+
+          echo "==> Verify Linux binary SHA256 against signed manifest"
+          EXPECTED_SHA="$(jq -r --arg platform "$PLATFORM" '.platforms[$platform].checksum // empty' manifest.json)"
+          if [ -z "$EXPECTED_SHA" ]; then
+            echo "Could not find .platforms[$PLATFORM].checksum in manifest.json" >&2
+            jq '.platforms' manifest.json >&2
+            exit 1
+          fi
+
+          ACTUAL_SHA="$(sha256sum "$RESOLVED_BIN" | awk '{print $1}')"
+
+          echo "Expected SHA256: $EXPECTED_SHA"
+          echo "Actual   SHA256: $ACTUAL_SHA"
+          test "$EXPECTED_SHA" = "$ACTUAL_SHA"
+
+          echo "==> Prepare offline payload"
+          install -m 0755 "$RESOLVED_BIN" "$OUTDIR/claude"
+          cp manifest.json manifest.json.sig claude-code.asc "$OUTDIR/"
+
+          cat > "$OUTDIR/install-offline.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          PREFIX="${PREFIX:-$HOME/.local}"
+          BIN_DIR="$PREFIX/bin"
+
+          mkdir -p "$BIN_DIR"
+          install -m 0755 ./claude "$BIN_DIR/claude"
+
+          echo "Installed Claude Code to: $BIN_DIR/claude"
+          echo "If needed, add this to your shell profile:"
+          echo "  export PATH=\"$BIN_DIR:\$PATH\""
+          echo
+
+          "$BIN_DIR/claude" --version || true
+          EOF
+
+          chmod +x "$OUTDIR/install-offline.sh"
+
+          cat > "$OUTDIR/README-offline-install.txt" <<EOF
+          Claude Code offline package
+          ===========================
+
+          Version:  $ACTUAL_VERSION
+          Platform: $PLATFORM
+          SHA256:   $ACTUAL_SHA
+
+          Files:
+          - claude
+          - install-offline.sh
+          - manifest.json
+          - manifest.json.sig
+          - claude-code.asc
+
+          Offline install on SLES:
+
+            tar xzf claude-code-$ACTUAL_VERSION-$PLATFORM.tgz
+            cd claude-code-$ACTUAL_VERSION-$PLATFORM
+            ./install-offline.sh
+            echo 'export PATH="\$HOME/.local/bin:\$PATH"' >> ~/.bashrc
+            source ~/.bashrc
+            claude --version
+
+          Optional system-wide install:
+
+            sudo PREFIX=/usr/local ./install-offline.sh
+
+          To prevent update attempts on an offline machine:
+
+            mkdir -p ~/.claude
+            cat > ~/.claude/settings.json <<'JSON'
+            {
+              "env": {
+                "DISABLE_UPDATES": "1"
+              },
+              "autoUpdatesChannel": "stable"
+            }
+            JSON
+          EOF
+
+          cd "$OUTDIR"
+
+          PACKAGE="claude-code-$ACTUAL_VERSION-$PLATFORM.tgz"
+          PACKAGE_DIR="claude-code-$ACTUAL_VERSION-$PLATFORM"
+
+          mkdir -p "$PACKAGE_DIR"
+          cp claude install-offline.sh README-offline-install.txt manifest.json manifest.json.sig claude-code.asc "$PACKAGE_DIR/"
+
+          tar -czf "$PACKAGE" "$PACKAGE_DIR"
+          sha256sum "$PACKAGE" > "$PACKAGE.sha256"
+
+          echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
+          echo "version=$ACTUAL_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Upload offline package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-code-${{ steps.package.outputs.version }}-linux-x64-offline
+          path: |
+            out/${{ steps.package.outputs.package }}
+            out/${{ steps.package.outputs.package }}.sha256
+          if-no-files-found: error
+          retention-days: 7
