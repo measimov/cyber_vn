@@ -1,4 +1,4 @@
-name: Build Claude Code Linux x64 offline package
+name: Build Claude Code and opencode Linux x64 offline packages
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ on:
 
 jobs:
   build-offline-package:
-    name: Build offline package
+    name: Build offline packages
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -182,12 +182,144 @@ jobs:
           echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
           echo "version=$ACTUAL_VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Upload offline package artifact
+      - name: Download and package latest opencode
+        id: opencode
+        shell: bash
+        env:
+          OPENCODE_REPO: anomalyco/opencode
+          OPENCODE_ASSET_NAME: opencode-linux-x64.tar.gz
+        run: |
+          set -euo pipefail
+
+          WORKDIR="$PWD/opencode-work"
+          OUTDIR="$PWD/opencode-out"
+          mkdir -p "$WORKDIR" "$OUTDIR"
+          cd "$WORKDIR"
+
+          echo "==> Resolve latest opencode release"
+          RELEASE_JSON="$(curl -fsSL "https://api.github.com/repos/$OPENCODE_REPO/releases/latest")"
+          TAG_NAME="$(printf '%s' "$RELEASE_JSON" | jq -r '.tag_name')"
+          VERSION="${TAG_NAME#v}"
+          ASSET_URL="$(printf '%s' "$RELEASE_JSON" | jq -r --arg name "$OPENCODE_ASSET_NAME" '.assets[] | select(.name == $name) | .browser_download_url' | head -1)"
+
+          if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
+            echo "Could not find asset $OPENCODE_ASSET_NAME in latest opencode release $TAG_NAME" >&2
+            printf '%s' "$RELEASE_JSON" | jq -r '.assets[].name' >&2
+            exit 1
+          fi
+
+          echo "opencode release: $TAG_NAME"
+          echo "asset: $OPENCODE_ASSET_NAME"
+          echo "url: $ASSET_URL"
+
+          curl -fL "$ASSET_URL" -o "$OPENCODE_ASSET_NAME"
+          ASSET_SHA256="$(sha256sum "$OPENCODE_ASSET_NAME" | awk '{print $1}')"
+          echo "$ASSET_SHA256  $OPENCODE_ASSET_NAME" > "$OPENCODE_ASSET_NAME.sha256"
+
+          mkdir extract
+          tar -xzf "$OPENCODE_ASSET_NAME" -C extract
+
+          echo "==> Extracted files"
+          find extract -maxdepth 3 -type f -print
+
+          OPENCODE_BIN="$(find extract -type f -name opencode -perm -111 | head -1 || true)"
+          if [ -z "$OPENCODE_BIN" ]; then
+            OPENCODE_BIN="$(find extract -type f -name opencode | head -1 || true)"
+          fi
+          if [ -z "$OPENCODE_BIN" ]; then
+            echo "Could not find opencode binary in $OPENCODE_ASSET_NAME" >&2
+            exit 1
+          fi
+
+          chmod +x "$OPENCODE_BIN"
+          BIN_SHA256="$(sha256sum "$OPENCODE_BIN" | awk '{print $1}')"
+
+          echo "opencode binary: $OPENCODE_BIN"
+          echo "asset sha256:    $ASSET_SHA256"
+          echo "binary sha256:   $BIN_SHA256"
+
+          install -m 0755 "$OPENCODE_BIN" "$OUTDIR/opencode"
+
+          cat > "$OUTDIR/install-opencode-offline.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          PREFIX="${PREFIX:-$HOME/.local}"
+          BIN_DIR="$PREFIX/bin"
+
+          mkdir -p "$BIN_DIR"
+          install -m 0755 ./opencode "$BIN_DIR/opencode"
+
+          echo "Installed opencode to: $BIN_DIR/opencode"
+          echo "If needed, add this to your shell profile:"
+          echo "  export PATH=\"$BIN_DIR:\$PATH\""
+          echo
+
+          "$BIN_DIR/opencode" --version || true
+          EOF
+
+          chmod +x "$OUTDIR/install-opencode-offline.sh"
+
+          cat > "$OUTDIR/README-opencode-offline-install.txt" <<EOF
+          opencode offline package
+          ========================
+
+          Source repository: https://github.com/$OPENCODE_REPO
+          Release:           $TAG_NAME
+          Platform:          linux-x64
+          Upstream asset:    $OPENCODE_ASSET_NAME
+          Asset SHA256:      $ASSET_SHA256
+          Binary SHA256:     $BIN_SHA256
+
+          Files:
+          - opencode
+          - install-opencode-offline.sh
+          - README-opencode-offline-install.txt
+
+          Offline install on Linux/SLES:
+
+            tar xzf opencode-$VERSION-linux-x64-offline.tgz
+            cd opencode-$VERSION-linux-x64-offline
+            ./install-opencode-offline.sh
+            echo 'export PATH="\$HOME/.local/bin:\$PATH"' >> ~/.bashrc
+            source ~/.bashrc
+            opencode --version
+
+          Optional system-wide install:
+
+            sudo PREFIX=/usr/local ./install-opencode-offline.sh
+          EOF
+
+          cd "$OUTDIR"
+
+          PACKAGE="opencode-$VERSION-linux-x64-offline.tgz"
+          PACKAGE_DIR="opencode-$VERSION-linux-x64-offline"
+
+          mkdir -p "$PACKAGE_DIR"
+          cp opencode install-opencode-offline.sh README-opencode-offline-install.txt "$PACKAGE_DIR/"
+
+          tar -czf "$PACKAGE" "$PACKAGE_DIR"
+          sha256sum "$PACKAGE" > "$PACKAGE.sha256"
+
+          echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Claude Code offline package artifact
         uses: actions/upload-artifact@v4
         with:
           name: claude-code-${{ steps.package.outputs.version }}-linux-x64-offline
           path: |
             out/${{ steps.package.outputs.package }}
             out/${{ steps.package.outputs.package }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload opencode offline package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-${{ steps.opencode.outputs.version }}-linux-x64-offline
+          path: |
+            opencode-out/${{ steps.opencode.outputs.package }}
+            opencode-out/${{ steps.opencode.outputs.package }}.sha256
           if-no-files-found: error
           retention-days: 7
