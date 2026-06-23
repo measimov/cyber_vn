@@ -1,0 +1,455 @@
+name: Build Win10 Python 3.9 Playwright Offline Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: "Output artifact/package base name"
+        required: true
+        default: "win10-python39-playwright155-offline"
+
+jobs:
+  build:
+    name: Build offline package
+    runs-on: windows-latest
+
+    env:
+      PYTHON_VERSION: "3.9.18"
+      PLAYWRIGHT_VERSION: "1.55.0"
+      PACKAGE_ROOT: "offline"
+      PLAYWRIGHT_BROWSERS_DIR: "offline\\ms-playwright"
+
+    steps:
+      - name: Set up Python 3.9.18
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9.18"
+          architecture: x64
+
+      - name: Show build environment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          python --version
+          python -c "import sys; print(sys.executable); print(sys.version)"
+          python -m pip --version
+
+      - name: Prepare offline package directories
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          New-Item -ItemType Directory -Force -Path "$env:PACKAGE_ROOT" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$env:PACKAGE_ROOT\python-runtime" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$env:PACKAGE_ROOT\wheelhouse" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$env:PACKAGE_ROOT\ms-playwright" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$env:PACKAGE_ROOT\scripts" | Out-Null
+
+      - name: Write pinned requirements
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          @"
+          Pillow==11.3.0
+          playwright==1.55.0
+          pytest==8.3.3
+          pytest-assume==2.4.3
+          pytest-base-url==2.1.0
+          pytest-html==1.2.1
+          pytest-metadata==3.1.1
+          pytest-playwright==0.7.1
+          pytest-playwright-snapshot==1.0
+          "@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\requirements.txt" -Encoding utf8
+
+          Get-Content "$env:PACKAGE_ROOT\requirements.txt"
+
+      - name: Download Python 3.9.18 embeddable runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $pythonZip = "python-$env:PYTHON_VERSION-embed-amd64.zip"
+          $pythonUrl = "https://www.python.org/ftp/python/$env:PYTHON_VERSION/$pythonZip"
+
+          Write-Host "Downloading $pythonUrl"
+          Invoke-WebRequest -Uri $pythonUrl -OutFile "$env:PACKAGE_ROOT\$pythonZip"
+
+          Expand-Archive -Path "$env:PACKAGE_ROOT\$pythonZip" -DestinationPath "$env:PACKAGE_ROOT\python-runtime" -Force
+
+          $pth = Get-ChildItem "$env:PACKAGE_ROOT\python-runtime" -Filter "python*._pth" | Select-Object -First 1
+          if ($null -eq $pth) {
+            throw "Could not find python ._pth file in embedded runtime"
+          }
+
+          $content = Get-Content $pth.FullName
+          $content = $content | ForEach-Object {
+            if ($_ -eq "#import site") {
+              "import site"
+            } else {
+              $_
+            }
+          }
+          Set-Content -Path $pth.FullName -Value $content -Encoding ASCII
+
+          Write-Host "Embedded Python runtime prepared:"
+          Get-ChildItem "$env:PACKAGE_ROOT\python-runtime" | Select-Object Name, Length | Format-Table -AutoSize
+
+      - name: Create venv and install Python packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          python -m venv "$env:PACKAGE_ROOT\venv"
+
+          & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" -m pip install --upgrade pip setuptools wheel
+          & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" -m pip install -r "$env:PACKAGE_ROOT\requirements.txt"
+
+          & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" -m pip freeze | Out-File -FilePath "$env:PACKAGE_ROOT\requirements.lock.txt" -Encoding utf8
+
+          Write-Host "Installed packages:"
+          Get-Content "$env:PACKAGE_ROOT\requirements.lock.txt"
+
+      - name: Download wheelhouse for offline reinstall/reference
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" -m pip download `
+            --dest "$env:PACKAGE_ROOT\wheelhouse" `
+            -r "$env:PACKAGE_ROOT\requirements.txt"
+
+          Write-Host "Wheelhouse:"
+          Get-ChildItem "$env:PACKAGE_ROOT\wheelhouse" | Select-Object Name, Length | Format-Table -AutoSize
+
+      - name: Download Playwright Chromium and ffmpeg only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $browserPath = (Resolve-Path "$env:PLAYWRIGHT_BROWSERS_DIR").Path
+          $env:PLAYWRIGHT_BROWSERS_PATH = $browserPath
+
+          Write-Host "PLAYWRIGHT_BROWSERS_PATH=$env:PLAYWRIGHT_BROWSERS_PATH"
+
+          # Only install Playwright-managed Chromium and ffmpeg.
+          # Do not install firefox/webkit.
+          & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" -m playwright install chromium ffmpeg
+
+          Write-Host "Playwright installed browsers:"
+          & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" -m playwright install --list
+
+          Write-Host "Browser directory:"
+          Get-ChildItem "$env:PACKAGE_ROOT\ms-playwright" | Select-Object Name, FullName | Format-Table -AutoSize
+
+          $chromiumDirs = Get-ChildItem "$env:PACKAGE_ROOT\ms-playwright" -Directory | Where-Object { $_.Name -like "chromium-*" }
+          if ($chromiumDirs.Count -lt 1) {
+            throw "Chromium was not downloaded into $env:PACKAGE_ROOT\ms-playwright"
+          }
+
+          $ffmpegDirs = Get-ChildItem "$env:PACKAGE_ROOT\ms-playwright" -Directory | Where-Object { $_.Name -like "ffmpeg-*" }
+          if ($ffmpegDirs.Count -lt 1) {
+            throw "ffmpeg was not downloaded into $env:PACKAGE_ROOT\ms-playwright"
+          }
+
+          Write-Host "Found Chromium dirs:"
+          $chromiumDirs | Select-Object Name, FullName | Format-Table -AutoSize
+
+          Write-Host "Found ffmpeg dirs:"
+          $ffmpegDirs | Select-Object Name, FullName | Format-Table -AutoSize
+
+      - name: Write offline install and activation scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          @'
+          param(
+            [string]$InstallDir = "$env:LOCALAPPDATA\offline-python39-playwright"
+          )
+
+          $ErrorActionPreference = "Stop"
+
+          $SourceRoot = $PSScriptRoot
+
+          Write-Host "Installing offline package from:"
+          Write-Host "  $SourceRoot"
+          Write-Host "to:"
+          Write-Host "  $InstallDir"
+
+          if (!(Test-Path $InstallDir)) {
+            New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+          }
+
+          Copy-Item -Path "$SourceRoot\*" -Destination $InstallDir -Recurse -Force
+
+          Write-Host ""
+          Write-Host "Install completed."
+          Write-Host ""
+          Write-Host "Activate environment:"
+          Write-Host "  powershell -ExecutionPolicy Bypass -File `"$InstallDir\activate-offline.ps1`""
+          Write-Host ""
+          Write-Host "Verify:"
+          Write-Host "  powershell -ExecutionPolicy Bypass -File `"$InstallDir\verify-offline.ps1`""
+          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\install-offline.ps1" -Encoding utf8
+
+          @'
+          $ErrorActionPreference = "Stop"
+
+          $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $Root "ms-playwright"
+          $env:PATH = (Join-Path $Root "venv\Scripts") + ";" + $env:PATH
+
+          Write-Host "Offline environment activated."
+          Write-Host ""
+          Write-Host "Root:"
+          Write-Host "  $Root"
+          Write-Host ""
+          Write-Host "PLAYWRIGHT_BROWSERS_PATH:"
+          Write-Host "  $env:PLAYWRIGHT_BROWSERS_PATH"
+          Write-Host ""
+
+          Write-Host "Python:"
+          python --version
+
+          Write-Host ""
+          Write-Host "pip:"
+          python -m pip --version
+
+          Write-Host ""
+          Write-Host "Playwright:"
+          python -m playwright --version
+
+          Write-Host ""
+          Write-Host "Installed Playwright browsers:"
+          python -m playwright install --list
+          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\activate-offline.ps1" -Encoding utf8
+
+          @'
+          $ErrorActionPreference = "Stop"
+
+          $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $Root "ms-playwright"
+          $env:PATH = (Join-Path $Root "venv\Scripts") + ";" + $env:PATH
+
+          & "$Root\venv\Scripts\python.exe" "$Root\verify-offline.py"
+          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\verify-offline.ps1" -Encoding utf8
+
+          @'
+          import os
+          import sys
+          import subprocess
+          import importlib.metadata as metadata
+
+          print("Python executable:", sys.executable)
+          print("Python version:", sys.version)
+          print("PLAYWRIGHT_BROWSERS_PATH:", os.environ.get("PLAYWRIGHT_BROWSERS_PATH"))
+
+          expected_versions = {
+              "Pillow": "11.3.0",
+              "playwright": "1.55.0",
+              "pytest": "8.3.3",
+              "pytest-assume": "2.4.3",
+              "pytest-base-url": "2.1.0",
+              "pytest-html": "1.2.1",
+              "pytest-metadata": "3.1.1",
+              "pytest-playwright": "0.7.1",
+              "pytest-playwright-snapshot": "1.0",
+          }
+
+          print("")
+          print("Checking package versions:")
+          for package, expected in expected_versions.items():
+              actual = metadata.version(package)
+              print(f"  {package}: {actual}")
+              if actual != expected:
+                  raise RuntimeError(f"{package} version mismatch: expected {expected}, got {actual}")
+
+          print("")
+          print("Checking imports:")
+          import PIL
+          import playwright
+          import pytest
+          import pytest_assume
+          import pytest_base_url
+          import pytest_html
+          import pytest_metadata
+          import pytest_playwright
+          import pytest_playwright_snapshot
+
+          print("  PIL:", PIL.__file__)
+          print("  playwright:", playwright.__file__)
+          print("  pytest:", pytest.__file__)
+
+          browser_root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+          if not browser_root or not os.path.isdir(browser_root):
+              raise RuntimeError("PLAYWRIGHT_BROWSERS_PATH is missing or invalid")
+
+          entries = sorted(os.listdir(browser_root))
+          print("")
+          print("Playwright browser root entries:")
+          for entry in entries:
+              print(" ", entry)
+
+          chromium_entries = [entry for entry in entries if entry.startswith("chromium-")]
+          ffmpeg_entries = [entry for entry in entries if entry.startswith("ffmpeg-")]
+
+          if not chromium_entries:
+              raise RuntimeError("No chromium-* directory found in PLAYWRIGHT_BROWSERS_PATH")
+          if not ffmpeg_entries:
+              raise RuntimeError("No ffmpeg-* directory found in PLAYWRIGHT_BROWSERS_PATH")
+
+          from playwright.sync_api import sync_playwright
+
+          print("")
+          print("Launching Chromium headless smoke test:")
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True)
+              page = browser.new_page()
+              page.goto("data:text/html,<html><head><title>offline-ok</title></head><body>ok</body></html>")
+              title = page.title()
+              browser.close()
+
+          print("  page.title():", title)
+          if title != "offline-ok":
+              raise RuntimeError("Chromium smoke test failed")
+
+          print("")
+          print("Checking Playwright ffmpeg binary:")
+          ffmpeg_candidates = []
+          for root, dirs, files in os.walk(browser_root):
+              for file in files:
+                  if file.lower() in ("ffmpeg.exe", "ffmpeg"):
+                      ffmpeg_candidates.append(os.path.join(root, file))
+
+          if not ffmpeg_candidates:
+              raise RuntimeError("No Playwright ffmpeg binary found")
+
+          for candidate in ffmpeg_candidates:
+              print(" ", candidate)
+
+          ffmpeg_exe = ffmpeg_candidates[0]
+          result = subprocess.run([ffmpeg_exe, "-version"], check=True, capture_output=True, text=True)
+          print(result.stdout.splitlines()[0])
+
+          print("")
+          print("Offline verification OK")
+          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\verify-offline.py" -Encoding utf8
+
+          @"
+          Win10 Python 3.9.18 Playwright 1.55.0 Offline Package
+          =====================================================
+
+          Target:
+          - Windows 10 x64
+          - Offline install/use after this package is downloaded
+
+          Included:
+          - Python virtual environment: venv\
+          - Python 3.9.18 embeddable runtime: python-runtime\
+          - Wheelhouse for offline reinstall/reference: wheelhouse\
+          - Playwright browser binaries: ms-playwright\
+            - Chromium only
+            - Playwright-managed ffmpeg
+          - Pinned requirements:
+            - Pillow==11.3.0
+            - playwright==1.55.0
+            - pytest==8.3.3
+            - pytest-assume==2.4.3
+            - pytest-base-url==2.1.0
+            - pytest-html==1.2.1
+            - pytest-metadata==3.1.1
+            - pytest-playwright==0.7.1
+            - pytest-playwright-snapshot==1.0
+
+          Offline install
+          ---------------
+
+          1. Extract this zip on the offline Windows 10 machine.
+
+          2. Open PowerShell in the extracted directory.
+
+          3. Install/copy to default location:
+
+             powershell -ExecutionPolicy Bypass -File .\install-offline.ps1
+
+             Default install location:
+
+             %LOCALAPPDATA%\offline-python39-playwright
+
+          4. Activate:
+
+             powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\offline-python39-playwright\activate-offline.ps1"
+
+          5. Verify:
+
+             powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\offline-python39-playwright\verify-offline.ps1"
+
+          Direct use without install
+          --------------------------
+
+          From the extracted directory:
+
+             powershell -ExecutionPolicy Bypass -File .\activate-offline.ps1
+             powershell -ExecutionPolicy Bypass -File .\verify-offline.ps1
+
+          Important environment variable
+          ------------------------------
+
+          This package stores Playwright browser binaries under:
+
+             ms-playwright\
+
+          The activation and verification scripts set:
+
+             PLAYWRIGHT_BROWSERS_PATH=<package-root>\ms-playwright
+
+          If your own scripts run outside activate-offline.ps1, set PLAYWRIGHT_BROWSERS_PATH first.
+          "@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\README-offline-install.txt" -Encoding utf8
+
+      - name: Verify offline package before artifact upload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $root = (Resolve-Path "$env:PACKAGE_ROOT").Path
+          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $root "ms-playwright"
+          $env:PATH = (Join-Path $root "venv\Scripts") + ";" + $env:PATH
+
+          & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" "$env:PACKAGE_ROOT\verify-offline.py"
+
+      - name: Create zip package
+        shell: pwsh
+        env:
+          PACKAGE_NAME: ${{ inputs.package_name }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $zipName = "$env:PACKAGE_NAME-py3918-playwright1550-win10-x64.zip"
+
+          if (Test-Path $zipName) {
+            Remove-Item $zipName -Force
+          }
+
+          Compress-Archive -Path "$env:PACKAGE_ROOT\*" -DestinationPath $zipName -CompressionLevel Optimal
+
+          $hash = Get-FileHash $zipName -Algorithm SHA256
+          "$($hash.Hash)  $zipName" | Out-File -FilePath "$zipName.sha256" -Encoding ascii
+
+          Write-Host "Created package:"
+          Get-Item $zipName, "$zipName.sha256" | Select-Object Name, Length | Format-Table -AutoSize
+
+          "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Upload offline package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.package_name }}-py3918-playwright1550-win10-x64
+          path: |
+            ${{ env.ZIP_NAME }}
+            ${{ env.ZIP_NAME }}.sha256
+          if-no-files-found: error
+          retention-days: 7
