@@ -194,85 +194,11 @@ jobs:
           Write-Host "ffmpeg directory tree:"
           Get-ChildItem "$expectedFfmpegDir" -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
 
-      - name: Write offline install and activation scripts
+      - name: Write offline Python verification script
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $PSNativeCommandUseErrorActionPreference = $true
-
-          @'
-          param(
-            [string]$InstallDir = "$env:LOCALAPPDATA\offline-python39-playwright"
-          )
-
-          $ErrorActionPreference = "Stop"
-
-          $SourceRoot = $PSScriptRoot
-
-          Write-Host "Installing offline package from:"
-          Write-Host "  $SourceRoot"
-          Write-Host "to:"
-          Write-Host "  $InstallDir"
-
-          if (!(Test-Path $InstallDir)) {
-            New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-          }
-
-          Copy-Item -Path "$SourceRoot\*" -Destination $InstallDir -Recurse -Force
-
-          Write-Host ""
-          Write-Host "Install completed."
-          Write-Host ""
-          Write-Host "Activate environment:"
-          Write-Host "  powershell -ExecutionPolicy Bypass -File `"$InstallDir\activate-offline.ps1`""
-          Write-Host ""
-          Write-Host "Verify:"
-          Write-Host "  powershell -ExecutionPolicy Bypass -File `"$InstallDir\verify-offline.ps1`""
-          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\install-offline.ps1" -Encoding utf8
-
-          @'
-          $ErrorActionPreference = "Stop"
-
-          $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-
-          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $Root "ms-playwright"
-          $env:PATH = (Join-Path $Root "venv\Scripts") + ";" + $env:PATH
-
-          Write-Host "Offline environment activated."
-          Write-Host ""
-          Write-Host "Root:"
-          Write-Host "  $Root"
-          Write-Host ""
-          Write-Host "PLAYWRIGHT_BROWSERS_PATH:"
-          Write-Host "  $env:PLAYWRIGHT_BROWSERS_PATH"
-          Write-Host ""
-
-          Write-Host "Python:"
-          python --version
-
-          Write-Host ""
-          Write-Host "pip:"
-          python -m pip --version
-
-          Write-Host ""
-          Write-Host "Playwright:"
-          python -m playwright --version
-
-          Write-Host ""
-          Write-Host "Installed Playwright browsers:"
-          python -m playwright install --list
-          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\activate-offline.ps1" -Encoding utf8
-
-          @'
-          $ErrorActionPreference = "Stop"
-
-          $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-
-          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $Root "ms-playwright"
-          $env:PATH = (Join-Path $Root "venv\Scripts") + ";" + $env:PATH
-
-          & "$Root\venv\Scripts\python.exe" "$Root\verify-offline.py"
-          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\verify-offline.ps1" -Encoding utf8
 
           @'
           import os
@@ -386,78 +312,552 @@ jobs:
           print("Offline verification OK")
           '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\verify-offline.py" -Encoding utf8
 
-          @"
-          Win10 Python 3.9.13 Playwright 1.55.0 Offline Package
-          =====================================================
+      - name: Write cmd helper scripts and README
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
 
-          Target:
-          - Windows 10 x64
-          - Offline install/use after this package is downloaded
+          @'
+          @echo off
 
-          Included:
-          - Python virtual environment: venv\
-          - Python 3.9.13 embeddable runtime: python-runtime\
-          - Wheelhouse for offline reinstall/reference: wheelhouse\
-          - Playwright browser binaries: ms-playwright\
-            - Chromium only
-            - Playwright-managed ffmpeg
-          - Pinned requirements:
-            - Pillow==11.3.0
-            - playwright==1.55.0
-            - pytest==8.3.3
-            - pytest-assume==2.4.3
-            - pytest-base-url==2.1.0
-            - pytest-html==1.2
-            - pytest-metadata==3.1.1
-            - pytest-playwright==0.7.1
-            - pytest-playwright-snapshot==1.0
+          rem Activate offline Python Playwright environment using packaged venv.
+          rem Usage:
+          rem   call env.cmd
 
-          Offline install
-          ---------------
+          set "OFFLINE_ROOT=%~dp0"
+          set "OFFLINE_ROOT=%OFFLINE_ROOT:~0,-1%"
 
-          1. Extract this zip on the offline Windows 10 machine.
+          set "VENV_PYTHON=%OFFLINE_ROOT%\venv\Scripts\python.exe"
 
-          2. Open PowerShell in the extracted directory.
+          if not exist "%VENV_PYTHON%" (
+            echo [ERROR] Cannot find venv Python:
+            echo   %VENV_PYTHON%
+            echo.
+            echo Try embedded mode:
+            echo   call env-embed.cmd
+            exit /b 1
+          )
 
-          3. Install/copy to default location:
+          set "PLAYWRIGHT_BROWSERS_PATH=%OFFLINE_ROOT%\ms-playwright"
 
-             powershell -ExecutionPolicy Bypass -File .\install-offline.ps1
+          if not exist "%PLAYWRIGHT_BROWSERS_PATH%" (
+            echo [ERROR] Cannot find Playwright browsers directory:
+            echo   %PLAYWRIGHT_BROWSERS_PATH%
+            exit /b 1
+          )
 
-             Default install location:
+          set "FFMPEG_DIR="
+          for /d %%D in ("%PLAYWRIGHT_BROWSERS_PATH%\ffmpeg-*") do (
+            set "FFMPEG_DIR=%%D"
+          )
 
-             %LOCALAPPDATA%\offline-python39-playwright
+          set "PATH=%OFFLINE_ROOT%\venv\Scripts;%PATH%"
+          if defined FFMPEG_DIR set "PATH=%FFMPEG_DIR%;%PATH%"
 
-          4. Activate:
+          echo Offline Python Playwright environment activated.
+          echo.
+          echo OFFLINE_ROOT=%OFFLINE_ROOT%
+          echo PLAYWRIGHT_BROWSERS_PATH=%PLAYWRIGHT_BROWSERS_PATH%
+          if defined FFMPEG_DIR echo FFMPEG_DIR=%FFMPEG_DIR%
+          echo.
+          python --version
+          python -m playwright --version
 
-             powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\offline-python39-playwright\activate-offline.ps1"
+          exit /b 0
+          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\env.cmd" -Encoding ascii
 
-          5. Verify:
+          @'
+          @echo off
 
-             powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\offline-python39-playwright\verify-offline.ps1"
+          call "%~dp0env.cmd"
+          if errorlevel 1 exit /b 1
 
-          Direct use without install
-          --------------------------
+          echo.
+          echo Running offline verification...
+          python "%~dp0verify-offline.py"
 
-          From the extracted directory:
+          if errorlevel 1 (
+            echo.
+            echo [ERROR] Verification failed.
+            exit /b 1
+          )
 
-             powershell -ExecutionPolicy Bypass -File .\activate-offline.ps1
-             powershell -ExecutionPolicy Bypass -File .\verify-offline.ps1
+          echo.
+          echo Verification OK.
+          exit /b 0
+          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\verify-offline.cmd" -Encoding ascii
 
-          Important environment variable
-          ------------------------------
+          @'
+          @echo off
 
-          This package stores Playwright browser binaries under:
+          call "%~dp0env.cmd"
+          if errorlevel 1 exit /b 1
 
-             ms-playwright\
+          python %*
+          exit /b %errorlevel%
+          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\run-python.cmd" -Encoding ascii
 
-          The activation and verification scripts set:
+          @'
+          @echo off
 
-             PLAYWRIGHT_BROWSERS_PATH=<package-root>\ms-playwright
+          call "%~dp0env.cmd"
+          if errorlevel 1 exit /b 1
 
-          If your own scripts run outside activate-offline.ps1, set PLAYWRIGHT_BROWSERS_PATH first.
-          "@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\README-offline-install.txt" -Encoding utf8
+          python -m pytest %*
+          exit /b %errorlevel%
+          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\run-pytest.cmd" -Encoding ascii
 
-      - name: Verify offline package before artifact upload
+          @'
+          @echo off
+
+          rem Activate offline Python Playwright environment using embedded Python runtime.
+          rem Usage:
+          rem   call env-embed.cmd
+
+          set "OFFLINE_ROOT=%~dp0"
+          set "OFFLINE_ROOT=%OFFLINE_ROOT:~0,-1%"
+
+          set "PYTHON_RUNTIME=%OFFLINE_ROOT%\python-runtime"
+          set "PYTHON_EXE=%PYTHON_RUNTIME%\python.exe"
+          set "PTH_FILE=%PYTHON_RUNTIME%\python39._pth"
+
+          if not exist "%PYTHON_EXE%" (
+            echo [ERROR] Cannot find embedded Python:
+            echo   %PYTHON_EXE%
+            exit /b 1
+          )
+
+          if not exist "%PTH_FILE%" (
+            echo [ERROR] Cannot find embedded Python path file:
+            echo   %PTH_FILE%
+            exit /b 1
+          )
+
+          if not exist "%OFFLINE_ROOT%\venv\Lib\site-packages" (
+            echo [ERROR] Cannot find venv site-packages:
+            echo   %OFFLINE_ROOT%\venv\Lib\site-packages
+            exit /b 1
+          )
+
+          findstr /C:"..\venv\Lib\site-packages" "%PTH_FILE%" >nul
+          if errorlevel 1 (
+            echo Adding venv site-packages to embedded Python path...
+            echo ..\venv\Lib\site-packages>>"%PTH_FILE%"
+          )
+
+          findstr /C:"import site" "%PTH_FILE%" >nul
+          if errorlevel 1 (
+            echo Enabling import site...
+            echo import site>>"%PTH_FILE%"
+          )
+
+          set "PLAYWRIGHT_BROWSERS_PATH=%OFFLINE_ROOT%\ms-playwright"
+
+          if not exist "%PLAYWRIGHT_BROWSERS_PATH%" (
+            echo [ERROR] Cannot find Playwright browsers directory:
+            echo   %PLAYWRIGHT_BROWSERS_PATH%
+            exit /b 1
+          )
+
+          set "FFMPEG_DIR="
+          for /d %%D in ("%PLAYWRIGHT_BROWSERS_PATH%\ffmpeg-*") do (
+            set "FFMPEG_DIR=%%D"
+          )
+
+          set "PATH=%PYTHON_RUNTIME%;%OFFLINE_ROOT%\venv\Scripts;%PATH%"
+          if defined FFMPEG_DIR set "PATH=%FFMPEG_DIR%;%PATH%"
+
+          echo Embedded offline Python Playwright environment activated.
+          echo.
+          echo OFFLINE_ROOT=%OFFLINE_ROOT%
+          echo PYTHON_EXE=%PYTHON_EXE%
+          echo PLAYWRIGHT_BROWSERS_PATH=%PLAYWRIGHT_BROWSERS_PATH%
+          if defined FFMPEG_DIR echo FFMPEG_DIR=%FFMPEG_DIR%
+          echo.
+          "%PYTHON_EXE%" --version
+          "%PYTHON_EXE%" -m playwright --version
+
+          exit /b 0
+          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\env-embed.cmd" -Encoding ascii
+
+          @'
+          @echo off
+
+          call "%~dp0env-embed.cmd"
+          if errorlevel 1 exit /b 1
+
+          echo.
+          echo Running embedded offline verification...
+          "%PYTHON_EXE%" "%~dp0verify-offline.py"
+
+          if errorlevel 1 (
+            echo.
+            echo [ERROR] Embedded verification failed.
+            exit /b 1
+          )
+
+          echo.
+          echo Embedded verification OK.
+          exit /b 0
+          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\verify-offline-embed.cmd" -Encoding ascii
+
+          @'
+          @echo off
+
+          call "%~dp0env-embed.cmd"
+          if errorlevel 1 exit /b 1
+
+          "%PYTHON_EXE%" %*
+          exit /b %errorlevel%
+          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\run-python-embed.cmd" -Encoding ascii
+
+          @'
+          @echo off
+
+          call "%~dp0env-embed.cmd"
+          if errorlevel 1 exit /b 1
+
+          "%PYTHON_EXE%" -m pytest %*
+          exit /b %errorlevel%
+          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\run-pytest-embed.cmd" -Encoding ascii
+
+          @'
+          # Win10 Python 3.9 + Playwright 1.55 离线包使用说明
+
+          本离线包用于在无互联网的 Windows 10 x64 环境中运行 Python 3.9、Playwright、Chromium、ffmpeg 以及相关 pytest 包。
+
+          ## 1. 离线包内容
+
+          解压后目录大致如下：
+
+          ```text
+          offline-python39-playwright\
+            venv\
+            python-runtime\
+            ms-playwright\
+            wheelhouse\
+            requirements.txt
+            requirements.lock.txt
+            verify-offline.py
+            env.cmd
+            verify-offline.cmd
+            run-python.cmd
+            run-pytest.cmd
+            env-embed.cmd
+            verify-offline-embed.cmd
+            run-python-embed.cmd
+            run-pytest-embed.cmd
+          ```
+
+          主要组件：
+
+          - `venv\`
+            - 已经安装好依赖的 Python 虚拟环境。
+          - `python-runtime\`
+            - Python 3.9.13 embeddable runtime。
+            - 用作备用启动方式。
+          - `ms-playwright\`
+            - Playwright 浏览器二进制。
+            - 包含 `chromium-1187`、`chromium_headless_shell-1187`、`ffmpeg-1011`、`winldd-1007`。
+          - `wheelhouse\`
+            - 离线 wheel 包缓存。
+          - `requirements.lock.txt`
+            - 实际安装的完整依赖版本。
+          - `verify-offline.py`
+            - 离线验证脚本。
+
+          已固定安装的主要包：
+
+          ```text
+          Pillow==11.3.0
+          playwright==1.55.0
+          pytest==8.3.3
+          pytest-assume==2.4.3
+          pytest-base-url==2.1.0
+          pytest-html==1.2
+          pytest-metadata==3.1.1
+          pytest-playwright==0.7.1
+          pytest-playwright-snapshot==1.0
+          ```
+
+          ## 2. 解压离线包
+
+          假设你从 GitHub Actions artifact 下载到：
+
+          ```text
+          win10-python39-playwright155-offline-py3913-playwright1550-win10-x64.zip
+          ```
+
+          在 Windows 10 上右键解压到：
+
+          ```text
+          C:\offline-python39-playwright
+          ```
+
+          最终目录应该类似：
+
+          ```text
+          C:\offline-python39-playwright\venv
+          C:\offline-python39-playwright\python-runtime
+          C:\offline-python39-playwright\ms-playwright
+          ```
+
+          ## 3. 可选：校验 SHA256
+
+          如果同目录有 `.sha256` 文件，可以用 `cmd.exe` 执行：
+
+          ```bat
+          certutil -hashfile win10-python39-playwright155-offline-py3913-playwright1550-win10-x64.zip SHA256
+          type win10-python39-playwright155-offline-py3913-playwright1550-win10-x64.zip.sha256
+          ```
+
+          比较两个 hash 是否一致。
+
+          ## 4. 首选方式：使用 venv
+
+          打开 `cmd.exe`：
+
+          ```bat
+          cd /d C:\offline-python39-playwright
+          verify-offline.cmd
+          ```
+
+          如果看到：
+
+          ```text
+          Offline verification OK
+          ```
+
+          说明离线包可用。
+
+          之后每次使用前执行：
+
+          ```bat
+          cd /d C:\offline-python39-playwright
+          call env.cmd
+          ```
+
+          然后可以运行：
+
+          ```bat
+          python --version
+          python -m playwright --version
+          python -m pytest
+          python your_script.py
+          ```
+
+          也可以直接用封装脚本：
+
+          ```bat
+          run-python.cmd your_script.py
+          run-pytest.cmd -q
+          ```
+
+          ## 5. 如果 venv 方式失败：使用 embedded Python 备用方式
+
+          某些 Windows 环境中，`venv\Scripts\python.exe` 可能因为路径搬迁问题无法运行。
+
+          如果 `verify-offline.cmd` 失败，请改用 embedded 方式：
+
+          ```bat
+          cd /d C:\offline-python39-playwright
+          verify-offline-embed.cmd
+          ```
+
+          如果看到：
+
+          ```text
+          Embedded verification OK
+          ```
+
+          之后使用：
+
+          ```bat
+          call env-embed.cmd
+          "%PYTHON_EXE%" --version
+          "%PYTHON_EXE%" -m pytest
+          "%PYTHON_EXE%" your_script.py
+          ```
+
+          也可以直接用封装脚本：
+
+          ```bat
+          run-python-embed.cmd your_script.py
+          run-pytest-embed.cmd -q
+          ```
+
+          ## 6. 运行 Playwright 示例
+
+          新建文件：
+
+          ```python
+          from playwright.sync_api import sync_playwright
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True)
+              page = browser.new_page()
+              page.goto("data:text/html,<title>offline-ok</title><h1>Hello</h1>")
+              print(page.title())
+              browser.close()
+          ```
+
+          使用 venv 方式运行：
+
+          ```bat
+          cd /d C:\offline-python39-playwright
+          run-python.cmd test_browser.py
+          ```
+
+          或者 embedded 方式：
+
+          ```bat
+          cd /d C:\offline-python39-playwright
+          run-python-embed.cmd test_browser.py
+          ```
+
+          正常输出：
+
+          ```text
+          offline-ok
+          ```
+
+          ## 7. 运行 pytest
+
+          使用 venv：
+
+          ```bat
+          cd /d C:\offline-python39-playwright
+          run-pytest.cmd -q
+          ```
+
+          指定测试目录：
+
+          ```bat
+          run-pytest.cmd tests -q
+          ```
+
+          生成 html 报告：
+
+          ```bat
+          run-pytest.cmd tests --html=report.html --self-contained-html
+          ```
+
+          使用 embedded：
+
+          ```bat
+          run-pytest-embed.cmd tests -q
+          ```
+
+          ## 8. 重要环境变量
+
+          脚本会自动设置：
+
+          ```bat
+          PLAYWRIGHT_BROWSERS_PATH=C:\offline-python39-playwright\ms-playwright
+          ```
+
+          Playwright 必须通过这个变量找到离线浏览器。
+
+          脚本还会自动把 Python 和 ffmpeg 所在目录加入当前 `cmd.exe` 会话的 `PATH`。
+
+          注意：这些变量只在当前 `cmd.exe` 窗口有效。关闭窗口后，下次需要重新执行：
+
+          ```bat
+          call env.cmd
+          ```
+
+          或：
+
+          ```bat
+          call env-embed.cmd
+          ```
+
+          ## 9. 推荐使用顺序
+
+          优先尝试：
+
+          ```bat
+          verify-offline.cmd
+          ```
+
+          如果失败，再尝试：
+
+          ```bat
+          verify-offline-embed.cmd
+          ```
+
+          如果两者都失败，请把完整输出保存下来，重点关注：
+
+          ```text
+          Python executable
+          Python version
+          PLAYWRIGHT_BROWSERS_PATH
+          Playwright browser root entries
+          ```
+
+          ## 10. 常见问题
+
+          ### Q1: 提示找不到浏览器
+
+          请确认环境变量：
+
+          ```bat
+          echo %PLAYWRIGHT_BROWSERS_PATH%
+          dir "%PLAYWRIGHT_BROWSERS_PATH%"
+          ```
+
+          应该能看到：
+
+          ```text
+          chromium-1187
+          chromium_headless_shell-1187
+          ffmpeg-1011
+          winldd-1007
+          ```
+
+          ### Q2: 不要执行 playwright install
+
+          离线环境不要运行：
+
+          ```bat
+          python -m playwright install
+          ```
+
+          这个命令会尝试联网下载浏览器。
+
+          本离线包已经内置浏览器，只需要设置：
+
+          ```bat
+          PLAYWRIGHT_BROWSERS_PATH
+          ```
+
+          ### Q3: cmd 里 python 不是离线包里的版本
+
+          请先执行：
+
+          ```bat
+          call env.cmd
+          where python
+          python --version
+          ```
+
+          第一条路径应该指向：
+
+          ```text
+          C:\offline-python39-playwright\venv\Scripts\python.exe
+          ```
+
+          如果用 embedded 方式，则执行：
+
+          ```bat
+          call env-embed.cmd
+          echo %PYTHON_EXE%
+          "%PYTHON_EXE%" --version
+          ```
+          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\README-WIN10-OFFLINE.md" -Encoding utf8
+
+      - name: Verify offline package with Python script before cmd checks
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -468,6 +868,26 @@ jobs:
           $env:PATH = (Join-Path $root "venv\Scripts") + ";" + $env:PATH
 
           & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" "$env:PACKAGE_ROOT\verify-offline.py"
+
+      - name: Verify cmd helper scripts
+        shell: cmd
+        run: |
+          cd /d offline
+          call verify-offline.cmd
+          call run-python.cmd --version
+          call run-python.cmd -m playwright --version
+          call run-python.cmd -m pytest --version
+          call run-pytest.cmd --version
+
+      - name: Verify embedded cmd helper scripts
+        shell: cmd
+        run: |
+          cd /d offline
+          call verify-offline-embed.cmd
+          call run-python-embed.cmd --version
+          call run-python-embed.cmd -m playwright --version
+          call run-python-embed.cmd -m pytest --version
+          call run-pytest-embed.cmd --version
 
       - name: Create zip package
         shell: pwsh
