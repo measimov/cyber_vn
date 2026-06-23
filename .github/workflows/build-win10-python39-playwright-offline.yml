@@ -22,20 +22,45 @@ jobs:
       PLAYWRIGHT_BROWSERS_DIR: "offline\\ms-playwright"
 
     steps:
-      - name: Set up Python 3.9.18
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.9.18"
-          architecture: x64
-
-      - name: Show build environment
+      - name: Install Python 3.9.18 from official installer
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          python --version
-          python -c "import sys; print(sys.executable); print(sys.version)"
-          python -m pip --version
+          $pythonInstaller = "python-$env:PYTHON_VERSION-amd64.exe"
+          $pythonUrl = "https://www.python.org/ftp/python/$env:PYTHON_VERSION/$pythonInstaller"
+          $pythonInstallDir = Join-Path $env:GITHUB_WORKSPACE "cpython-$($env:PYTHON_VERSION)-x64"
+
+          Write-Host "Downloading $pythonUrl"
+          Invoke-WebRequest -Uri $pythonUrl -OutFile $pythonInstaller
+
+          Write-Host "Installing Python to $pythonInstallDir"
+          Start-Process -FilePath ".\$pythonInstaller" -ArgumentList @(
+            "/quiet",
+            "InstallAllUsers=0",
+            "TargetDir=$pythonInstallDir",
+            "PrependPath=0",
+            "Include_test=0",
+            "Include_launcher=0",
+            "Include_pip=1"
+          ) -Wait -NoNewWindow
+
+          $pythonExe = Join-Path $pythonInstallDir "python.exe"
+          if (!(Test-Path $pythonExe)) {
+            throw "Python install failed: $pythonExe not found"
+          }
+
+          "PYTHON_EXE=$pythonExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PYTHON_INSTALL_DIR=$pythonInstallDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Show Python build environment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          & "$env:PYTHON_EXE" --version
+          & "$env:PYTHON_EXE" -c "import sys; print(sys.executable); print(sys.version)"
+          & "$env:PYTHON_EXE" -m pip --version
 
       - name: Prepare offline package directories
         shell: pwsh
@@ -103,7 +128,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          python -m venv "$env:PACKAGE_ROOT\venv"
+          & "$env:PYTHON_EXE" -m venv "$env:PACKAGE_ROOT\venv"
 
           & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" -m pip install --upgrade pip setuptools wheel
           & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" -m pip install -r "$env:PACKAGE_ROOT\requirements.txt"
@@ -136,7 +161,7 @@ jobs:
           Write-Host "PLAYWRIGHT_BROWSERS_PATH=$env:PLAYWRIGHT_BROWSERS_PATH"
 
           # Only install Playwright-managed Chromium and ffmpeg.
-          # Do not install firefox/webkit.
+          # Do not install Firefox/WebKit.
           & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" -m playwright install chromium ffmpeg
 
           Write-Host "Playwright installed browsers:"
@@ -145,21 +170,20 @@ jobs:
           Write-Host "Browser directory:"
           Get-ChildItem "$env:PACKAGE_ROOT\ms-playwright" | Select-Object Name, FullName | Format-Table -AutoSize
 
-          $chromiumDirs = Get-ChildItem "$env:PACKAGE_ROOT\ms-playwright" -Directory | Where-Object { $_.Name -like "chromium-*" }
-          if ($chromiumDirs.Count -lt 1) {
-            throw "Chromium was not downloaded into $env:PACKAGE_ROOT\ms-playwright"
+          $expectedChromiumDir = Join-Path "$env:PACKAGE_ROOT\ms-playwright" "chromium-$env:EXPECTED_CHROMIUM_REVISION"
+          $expectedFfmpegDir = Join-Path "$env:PACKAGE_ROOT\ms-playwright" "ffmpeg-$env:EXPECTED_FFMPEG_REVISION"
+
+          if (!(Test-Path $expectedChromiumDir)) {
+            throw "Expected Chromium directory not found: $expectedChromiumDir"
           }
 
-          $ffmpegDirs = Get-ChildItem "$env:PACKAGE_ROOT\ms-playwright" -Directory | Where-Object { $_.Name -like "ffmpeg-*" }
-          if ($ffmpegDirs.Count -lt 1) {
-            throw "ffmpeg was not downloaded into $env:PACKAGE_ROOT\ms-playwright"
+          if (!(Test-Path $expectedFfmpegDir)) {
+            throw "Expected ffmpeg directory not found: $expectedFfmpegDir"
           }
 
-          Write-Host "Found Chromium dirs:"
-          $chromiumDirs | Select-Object Name, FullName | Format-Table -AutoSize
-
-          Write-Host "Found ffmpeg dirs:"
-          $ffmpegDirs | Select-Object Name, FullName | Format-Table -AutoSize
+          Write-Host "Expected Playwright browser revisions are present:"
+          Write-Host "  chromium-$env:EXPECTED_CHROMIUM_REVISION"
+          Write-Host "  ffmpeg-$env:EXPECTED_FFMPEG_REVISION"
 
       - name: Write offline install and activation scripts
         shell: pwsh
@@ -303,6 +327,11 @@ jobs:
               raise RuntimeError("No chromium-* directory found in PLAYWRIGHT_BROWSERS_PATH")
           if not ffmpeg_entries:
               raise RuntimeError("No ffmpeg-* directory found in PLAYWRIGHT_BROWSERS_PATH")
+
+          if "chromium-1187" not in entries:
+              raise RuntimeError("Expected chromium-1187 was not found")
+          if "ffmpeg-1011" not in entries:
+              raise RuntimeError("Expected ffmpeg-1011 was not found")
 
           from playwright.sync_api import sync_playwright
 
