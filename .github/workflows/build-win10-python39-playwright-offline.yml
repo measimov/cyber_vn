@@ -191,6 +191,9 @@ jobs:
           Write-Host "  chromium-$env:EXPECTED_CHROMIUM_REVISION"
           Write-Host "  ffmpeg-$env:EXPECTED_FFMPEG_REVISION"
 
+          Write-Host "ffmpeg directory tree:"
+          Get-ChildItem "$expectedFfmpegDir" -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
+
       - name: Write offline install and activation scripts
         shell: pwsh
         run: |
@@ -360,10 +363,16 @@ jobs:
           ffmpeg_candidates = []
           for root, dirs, files in os.walk(browser_root):
               for file in files:
-                  if file.lower() in ("ffmpeg.exe", "ffmpeg"):
+                  lower = file.lower()
+                  if lower in ("ffmpeg.exe", "ffmpeg") or lower.startswith("ffmpeg"):
                       ffmpeg_candidates.append(os.path.join(root, file))
 
           if not ffmpeg_candidates:
+              print("No direct ffmpeg executable name matched. Dumping ffmpeg-1011 tree:")
+              ffmpeg_dir = os.path.join(browser_root, "ffmpeg-1011")
+              for root, dirs, files in os.walk(ffmpeg_dir):
+                  for file in files:
+                      print(" ", os.path.join(root, file))
               raise RuntimeError("No Playwright ffmpeg binary found")
 
           for candidate in ffmpeg_candidates:
