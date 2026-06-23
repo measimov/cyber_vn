@@ -74,7 +74,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$env:PACKAGE_ROOT\python-runtime" | Out-Null
           New-Item -ItemType Directory -Force -Path "$env:PACKAGE_ROOT\wheelhouse" | Out-Null
           New-Item -ItemType Directory -Force -Path "$env:PACKAGE_ROOT\ms-playwright" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$env:PACKAGE_ROOT\scripts" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$env:PACKAGE_ROOT\smoke_tests" | Out-Null
 
       - name: Write pinned requirements
         shell: pwsh
@@ -84,6 +84,7 @@ jobs:
 
           @"
           setuptools==80.9.0
+          py==1.11.0
           Pillow==11.3.0
           playwright==1.55.0
           pytest==8.3.3
@@ -205,7 +206,14 @@ jobs:
           import os
           import sys
           import subprocess
+          import warnings
           import importlib.metadata as metadata
+
+          warnings.filterwarnings(
+              "ignore",
+              message="pkg_resources is deprecated as an API.*",
+              category=UserWarning,
+          )
 
           print("Python executable:", sys.executable)
           print("Python version:", sys.version)
@@ -213,6 +221,7 @@ jobs:
 
           expected_versions = {
               "setuptools": "80.9.0",
+              "py": "1.11.0",
               "Pillow": "11.3.0",
               "playwright": "1.55.0",
               "pytest": "8.3.3",
@@ -235,6 +244,9 @@ jobs:
           print("")
           print("Checking imports:")
           import pkg_resources
+          import py
+          from py.xml import html as _py_html
+          from py.xml import raw as _py_raw
           import PIL
           import playwright
           import pytest
@@ -246,6 +258,8 @@ jobs:
           import pytest_playwright_snapshot
 
           print("  pkg_resources:", pkg_resources.__file__)
+          print("  py:", py.__file__)
+          print("  py.xml.html:", _py_html)
           print("  PIL:", PIL.__file__)
           print("  playwright:", playwright.__file__)
           print("  pytest:", pytest.__file__)
@@ -356,6 +370,7 @@ jobs:
             set "FFMPEG_DIR=%%D"
           )
 
+          set "PYTHONWARNINGS=ignore:pkg_resources is deprecated as an API:UserWarning"
           set "PATH=%OFFLINE_ROOT%\venv\Scripts;%PATH%"
           if defined FFMPEG_DIR set "PATH=%FFMPEG_DIR%;%PATH%"
 
@@ -469,6 +484,7 @@ jobs:
             set "FFMPEG_DIR=%%D"
           )
 
+          set "PYTHONWARNINGS=ignore:pkg_resources is deprecated as an API:UserWarning"
           set "PATH=%PYTHON_RUNTIME%;%OFFLINE_ROOT%\venv\Scripts;%PATH%"
           if defined FFMPEG_DIR set "PATH=%FFMPEG_DIR%;%PATH%"
 
@@ -529,338 +545,147 @@ jobs:
           @'
           # Win10 Python 3.9 + Playwright 1.55 离线包使用说明
 
-          本离线包用于在无互联网的 Windows 10 x64 环境中运行 Python 3.9、Playwright、Chromium、ffmpeg 以及相关 pytest 包。
+          ## 1. 解压
 
-          ## 1. 离线包内容
-
-          解压后目录大致如下：
-
-          ```text
-          offline-python39-playwright\
-            venv\
-            python-runtime\
-            ms-playwright\
-            wheelhouse\
-            requirements.txt
-            requirements.lock.txt
-            verify-offline.py
-            env.cmd
-            verify-offline.cmd
-            run-python.cmd
-            run-pytest.cmd
-            env-embed.cmd
-            verify-offline-embed.cmd
-            run-python-embed.cmd
-            run-pytest-embed.cmd
-          ```
-
-          主要组件：
-
-          - `venv\`
-            - 已经安装好依赖的 Python 虚拟环境。
-          - `python-runtime\`
-            - Python 3.9.13 embeddable runtime。
-            - 用作备用启动方式。
-          - `ms-playwright\`
-            - Playwright 浏览器二进制。
-            - 包含 `chromium-1187`、`chromium_headless_shell-1187`、`ffmpeg-1011`、`winldd-1007`。
-          - `wheelhouse\`
-            - 离线 wheel 包缓存。
-          - `requirements.lock.txt`
-            - 实际安装的完整依赖版本。
-          - `verify-offline.py`
-            - 离线验证脚本。
-
-          已固定安装的主要包：
-
-          ```text
-          setuptools==80.9.0
-          Pillow==11.3.0
-          playwright==1.55.0
-          pytest==8.3.3
-          pytest-assume==2.4.3
-          pytest-base-url==2.1.0
-          pytest-html==1.2
-          pytest-metadata==3.1.1
-          pytest-playwright==0.7.1
-          pytest-playwright-snapshot==1.0
-          ```
-
-          ## 2. 解压离线包
-
-          假设你从 GitHub Actions artifact 下载到：
-
-          ```text
-          win10-python39-playwright155-offline-py3913-playwright1550-win10-x64.zip
-          ```
-
-          在 Windows 10 上右键解压到：
+          将 artifact 中的 zip 解压到目标 Win10，例如：
 
           ```text
           C:\offline-python39-playwright
           ```
 
-          最终目录应该类似：
+          解压后应能看到：
 
           ```text
-          C:\offline-python39-playwright\venv
-          C:\offline-python39-playwright\python-runtime
-          C:\offline-python39-playwright\ms-playwright
+          venv\
+          python-runtime\
+          ms-playwright\
+          wheelhouse\
+          requirements.txt
+          requirements.lock.txt
+          verify-offline.py
+          env.cmd
+          verify-offline.cmd
+          run-python.cmd
+          run-pytest.cmd
+          env-embed.cmd
+          verify-offline-embed.cmd
+          run-python-embed.cmd
+          run-pytest-embed.cmd
           ```
 
-          ## 3. 可选：校验 SHA256
+          ## 2. 首选验证方式
 
-          如果同目录有 `.sha256` 文件，可以用 `cmd.exe` 执行：
-
-          ```bat
-          certutil -hashfile win10-python39-playwright155-offline-py3913-playwright1550-win10-x64.zip SHA256
-          type win10-python39-playwright155-offline-py3913-playwright1550-win10-x64.zip.sha256
-          ```
-
-          比较两个 hash 是否一致。
-
-          ## 4. 首选方式：使用 venv
-
-          打开 `cmd.exe`：
+          打开 cmd.exe：
 
           ```bat
           cd /d C:\offline-python39-playwright
           verify-offline.cmd
           ```
 
-          如果看到：
+          看到下面内容表示可用：
 
           ```text
           Offline verification OK
+          Verification OK.
           ```
 
-          说明离线包可用。
-
-          之后每次使用前执行：
+          ## 3. 日常使用
 
           ```bat
           cd /d C:\offline-python39-playwright
           call env.cmd
-          ```
-
-          然后可以运行：
-
-          ```bat
           python --version
-          python -m playwright --version
-          python -m pytest
           python your_script.py
+          python -m pytest
           ```
 
-          也可以直接用封装脚本：
+          或直接用封装脚本：
 
           ```bat
           run-python.cmd your_script.py
-          run-pytest.cmd -q
+          run-pytest.cmd tests -q
+          run-pytest.cmd tests --html=report.html
           ```
 
-          ## 5. 如果 venv 方式失败：使用 embedded Python 备用方式
+          注意：本包使用的是较老的 `pytest-html==1.2`，不要默认加 `--self-contained-html`，该选项不保证存在。
 
-          某些 Windows 环境中，`venv\Scripts\python.exe` 可能因为路径搬迁问题无法运行。
+          ## 4. embedded Python 备用方式
 
-          如果 `verify-offline.cmd` 失败，请改用 embedded 方式：
+          如果 venv 方式失败，使用 embedded 备用方式：
 
           ```bat
           cd /d C:\offline-python39-playwright
           verify-offline-embed.cmd
           ```
 
-          如果看到：
-
-          ```text
-          Embedded verification OK
-          ```
-
-          之后使用：
+          日常使用：
 
           ```bat
           call env-embed.cmd
-          "%PYTHON_EXE%" --version
-          "%PYTHON_EXE%" -m pytest
           "%PYTHON_EXE%" your_script.py
-          ```
-
-          也可以直接用封装脚本：
-
-          ```bat
-          run-python-embed.cmd your_script.py
-          run-pytest-embed.cmd -q
-          ```
-
-          ## 6. 运行 Playwright 示例
-
-          新建文件：
-
-          ```python
-          from playwright.sync_api import sync_playwright
-
-          with sync_playwright() as p:
-              browser = p.chromium.launch(headless=True)
-              page = browser.new_page()
-              page.goto("data:text/html,<title>offline-ok</title><h1>Hello</h1>")
-              print(page.title())
-              browser.close()
-          ```
-
-          使用 venv 方式运行：
-
-          ```bat
-          cd /d C:\offline-python39-playwright
-          run-python.cmd test_browser.py
-          ```
-
-          或者 embedded 方式：
-
-          ```bat
-          cd /d C:\offline-python39-playwright
-          run-python-embed.cmd test_browser.py
-          ```
-
-          正常输出：
-
-          ```text
-          offline-ok
-          ```
-
-          ## 7. 运行 pytest
-
-          使用 venv：
-
-          ```bat
-          cd /d C:\offline-python39-playwright
-          run-pytest.cmd -q
-          ```
-
-          指定测试目录：
-
-          ```bat
-          run-pytest.cmd tests -q
-          ```
-
-          生成 html 报告：
-
-          ```bat
-          run-pytest.cmd tests --html=report.html --self-contained-html
-          ```
-
-          使用 embedded：
-
-          ```bat
-          run-pytest-embed.cmd tests -q
-          ```
-
-          ## 8. 重要环境变量
-
-          脚本会自动设置：
-
-          ```bat
-          PLAYWRIGHT_BROWSERS_PATH=C:\offline-python39-playwright\ms-playwright
-          ```
-
-          Playwright 必须通过这个变量找到离线浏览器。
-
-          脚本还会自动把 Python 和 ffmpeg 所在目录加入当前 `cmd.exe` 会话的 `PATH`。
-
-          注意：这些变量只在当前 `cmd.exe` 窗口有效。关闭窗口后，下次需要重新执行：
-
-          ```bat
-          call env.cmd
+          "%PYTHON_EXE%" -m pytest tests -q
           ```
 
           或：
 
           ```bat
-          call env-embed.cmd
+          run-python-embed.cmd your_script.py
+          run-pytest-embed.cmd tests -q
           ```
 
-          ## 9. 推荐使用顺序
-
-          优先尝试：
-
-          ```bat
-          verify-offline.cmd
-          ```
-
-          如果失败，再尝试：
-
-          ```bat
-          verify-offline-embed.cmd
-          ```
-
-          如果两者都失败，请把完整输出保存下来，重点关注：
+          ## 5. 已固定组件
 
           ```text
-          Python executable
-          Python version
-          PLAYWRIGHT_BROWSERS_PATH
-          Playwright browser root entries
+          Python installer/runtime: 3.9.13 x64
+          Playwright: 1.55.0
+          Chromium: chromium-1187
+          ffmpeg: ffmpeg-1011
+          setuptools: 80.9.0
+          py: 1.11.0
+          Pillow: 11.3.0
+          pytest: 8.3.3
+          pytest-assume: 2.4.3
+          pytest-base-url: 2.1.0
+          pytest-html: 1.2
+          pytest-metadata: 3.1.1
+          pytest-playwright: 0.7.1
+          pytest-playwright-snapshot: 1.0
           ```
 
-          ## 10. 常见问题
+          ## 6. 不要在离线机器执行浏览器安装
 
-          ### Q1: 提示找不到浏览器
-
-          请确认环境变量：
-
-          ```bat
-          echo %PLAYWRIGHT_BROWSERS_PATH%
-          dir "%PLAYWRIGHT_BROWSERS_PATH%"
-          ```
-
-          应该能看到：
-
-          ```text
-          chromium-1187
-          chromium_headless_shell-1187
-          ffmpeg-1011
-          winldd-1007
-          ```
-
-          ### Q2: 不要执行 playwright install
-
-          离线环境不要运行：
+          不要执行：
 
           ```bat
           python -m playwright install
           ```
 
-          这个命令会尝试联网下载浏览器。
-
-          本离线包已经内置浏览器，只需要设置：
+          本包已经内置浏览器。脚本会设置：
 
           ```bat
-          PLAYWRIGHT_BROWSERS_PATH
+          PLAYWRIGHT_BROWSERS_PATH=<解压目录>\ms-playwright
           ```
 
-          ### Q3: cmd 里 python 不是离线包里的版本
+          ## 7. SHA256 校验
 
-          请先执行：
+          如果同目录有 `.sha256` 文件：
 
           ```bat
-          call env.cmd
-          where python
-          python --version
-          ```
-
-          第一条路径应该指向：
-
-          ```text
-          C:\offline-python39-playwright\venv\Scripts\python.exe
-          ```
-
-          如果用 embedded 方式，则执行：
-
-          ```bat
-          call env-embed.cmd
-          echo %PYTHON_EXE%
-          "%PYTHON_EXE%" --version
+          certutil -hashfile win10-python39-playwright155-offline-py3913-playwright1550-win10-x64.zip SHA256
+          type win10-python39-playwright155-offline-py3913-playwright1550-win10-x64.zip.sha256
           ```
           '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\README-WIN10-OFFLINE.md" -Encoding utf8
+
+      - name: Write pytest smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          @'
+          def test_basic_ok():
+              assert True
+          '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\smoke_tests\test_basic.py" -Encoding utf8
 
       - name: Verify offline package with Python script before cmd checks
         shell: pwsh
@@ -870,6 +695,7 @@ jobs:
 
           $root = (Resolve-Path "$env:PACKAGE_ROOT").Path
           $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $root "ms-playwright"
+          $env:PYTHONWARNINGS = "ignore:pkg_resources is deprecated as an API:UserWarning"
           $env:PATH = (Join-Path $root "venv\Scripts") + ";" + $env:PATH
 
           & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" "$env:PACKAGE_ROOT\verify-offline.py"
@@ -883,6 +709,8 @@ jobs:
           call run-python.cmd -m playwright --version
           call run-python.cmd -m pytest --version
           call run-pytest.cmd --version
+          call run-pytest.cmd smoke_tests -q --html=pytest-smoke-report.html
+          if not exist pytest-smoke-report.html exit /b 1
 
       - name: Verify embedded cmd helper scripts
         shell: cmd
@@ -893,6 +721,8 @@ jobs:
           call run-python-embed.cmd -m playwright --version
           call run-python-embed.cmd -m pytest --version
           call run-pytest-embed.cmd --version
+          call run-pytest-embed.cmd smoke_tests -q --html=pytest-smoke-report-embed.html
+          if not exist pytest-smoke-report-embed.html exit /b 1
 
       - name: Create zip package
         shell: pwsh
