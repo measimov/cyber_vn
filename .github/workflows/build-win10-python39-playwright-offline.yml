@@ -84,13 +84,12 @@ jobs:
 
           @"
           setuptools==80.9.0
-          py==1.11.0
           Pillow==11.3.0
           playwright==1.55.0
           pytest==8.3.3
           pytest-assume==2.4.3
           pytest-base-url==2.1.0
-          pytest-html==1.2
+          pytest-html==4.1.1
           pytest-metadata==3.1.1
           pytest-playwright==0.7.1
           pytest-playwright-snapshot==1.0
@@ -206,14 +205,7 @@ jobs:
           import os
           import sys
           import subprocess
-          import warnings
           import importlib.metadata as metadata
-
-          warnings.filterwarnings(
-              "ignore",
-              message="pkg_resources is deprecated as an API.*",
-              category=UserWarning,
-          )
 
           print("Python executable:", sys.executable)
           print("Python version:", sys.version)
@@ -221,13 +213,12 @@ jobs:
 
           expected_versions = {
               "setuptools": "80.9.0",
-              "py": "1.11.0",
               "Pillow": "11.3.0",
               "playwright": "1.55.0",
               "pytest": "8.3.3",
               "pytest-assume": "2.4.3",
               "pytest-base-url": "2.1.0",
-              "pytest-html": "1.2",
+              "pytest-html": "4.1.1",
               "pytest-metadata": "3.1.1",
               "pytest-playwright": "0.7.1",
               "pytest-playwright-snapshot": "1.0",
@@ -243,10 +234,6 @@ jobs:
 
           print("")
           print("Checking imports:")
-          import pkg_resources
-          import py
-          from py.xml import html as _py_html
-          from py.xml import raw as _py_raw
           import PIL
           import playwright
           import pytest
@@ -257,12 +244,10 @@ jobs:
           import pytest_playwright
           import pytest_playwright_snapshot
 
-          print("  pkg_resources:", pkg_resources.__file__)
-          print("  py:", py.__file__)
-          print("  py.xml.html:", _py_html)
           print("  PIL:", PIL.__file__)
           print("  playwright:", playwright.__file__)
           print("  pytest:", pytest.__file__)
+          print("  pytest_html:", pytest_html.__file__)
 
           browser_root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
           if not browser_root or not os.path.isdir(browser_root):
@@ -370,7 +355,6 @@ jobs:
             set "FFMPEG_DIR=%%D"
           )
 
-          set "PYTHONWARNINGS=ignore:pkg_resources is deprecated as an API:UserWarning"
           set "PATH=%OFFLINE_ROOT%\venv\Scripts;%PATH%"
           if defined FFMPEG_DIR set "PATH=%FFMPEG_DIR%;%PATH%"
 
@@ -484,7 +468,6 @@ jobs:
             set "FFMPEG_DIR=%%D"
           )
 
-          set "PYTHONWARNINGS=ignore:pkg_resources is deprecated as an API:UserWarning"
           set "PATH=%PYTHON_RUNTIME%;%OFFLINE_ROOT%\venv\Scripts;%PATH%"
           if defined FFMPEG_DIR set "PATH=%FFMPEG_DIR%;%PATH%"
 
@@ -607,8 +590,6 @@ jobs:
           run-pytest.cmd tests --html=report.html
           ```
 
-          注意：本包使用的是较老的 `pytest-html==1.2`，不要默认加 `--self-contained-html`，该选项不保证存在。
-
           ## 4. embedded Python 备用方式
 
           如果 venv 方式失败，使用 embedded 备用方式：
@@ -641,12 +622,11 @@ jobs:
           Chromium: chromium-1187
           ffmpeg: ffmpeg-1011
           setuptools: 80.9.0
-          py: 1.11.0
           Pillow: 11.3.0
           pytest: 8.3.3
           pytest-assume: 2.4.3
           pytest-base-url: 2.1.0
-          pytest-html: 1.2
+          pytest-html: 4.1.1
           pytest-metadata: 3.1.1
           pytest-playwright: 0.7.1
           pytest-playwright-snapshot: 1.0
@@ -695,7 +675,6 @@ jobs:
 
           $root = (Resolve-Path "$env:PACKAGE_ROOT").Path
           $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $root "ms-playwright"
-          $env:PYTHONWARNINGS = "ignore:pkg_resources is deprecated as an API:UserWarning"
           $env:PATH = (Join-Path $root "venv\Scripts") + ";" + $env:PATH
 
           & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" "$env:PACKAGE_ROOT\verify-offline.py"
