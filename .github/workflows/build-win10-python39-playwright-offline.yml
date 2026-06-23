@@ -83,6 +83,7 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
 
           @"
+          setuptools==80.9.0
           Pillow==11.3.0
           playwright==1.55.0
           pytest==8.3.3
@@ -136,7 +137,7 @@ jobs:
 
           & "$env:PYTHON_EXE" -m venv "$env:PACKAGE_ROOT\venv"
 
-          & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" -m pip install --upgrade pip setuptools wheel
+          & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" -m pip install --upgrade pip "setuptools==80.9.0" wheel
           & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" -m pip install -r "$env:PACKAGE_ROOT\requirements.txt"
 
           & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" -m pip freeze | Out-File -FilePath "$env:PACKAGE_ROOT\requirements.lock.txt" -Encoding utf8
@@ -211,6 +212,7 @@ jobs:
           print("PLAYWRIGHT_BROWSERS_PATH:", os.environ.get("PLAYWRIGHT_BROWSERS_PATH"))
 
           expected_versions = {
+              "setuptools": "80.9.0",
               "Pillow": "11.3.0",
               "playwright": "1.55.0",
               "pytest": "8.3.3",
@@ -232,6 +234,7 @@ jobs:
 
           print("")
           print("Checking imports:")
+          import pkg_resources
           import PIL
           import playwright
           import pytest
@@ -242,6 +245,7 @@ jobs:
           import pytest_playwright
           import pytest_playwright_snapshot
 
+          print("  pkg_resources:", pkg_resources.__file__)
           print("  PIL:", PIL.__file__)
           print("  playwright:", playwright.__file__)
           print("  pytest:", pytest.__file__)
@@ -570,6 +574,7 @@ jobs:
           已固定安装的主要包：
 
           ```text
+          setuptools==80.9.0
           Pillow==11.3.0
           playwright==1.55.0
           pytest==8.3.3
