@@ -16,6 +16,8 @@ jobs:
     env:
       PYTHON_VERSION: "3.9.18"
       PLAYWRIGHT_VERSION: "1.55.0"
+      EXPECTED_CHROMIUM_REVISION: "1187"
+      EXPECTED_FFMPEG_REVISION: "1011"
       PACKAGE_ROOT: "offline"
       PLAYWRIGHT_BROWSERS_DIR: "offline\\ms-playwright"
 
