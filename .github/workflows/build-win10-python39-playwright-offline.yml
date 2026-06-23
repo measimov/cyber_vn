@@ -26,6 +26,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
 
           $pythonInstaller = "python-$env:PYTHON_VERSION-amd64.exe"
           $pythonUrl = "https://www.python.org/ftp/python/$env:PYTHON_VERSION/$pythonInstaller"
@@ -57,6 +58,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
 
           & "$env:PYTHON_EXE" --version
           & "$env:PYTHON_EXE" -c "import sys; print(sys.executable); print(sys.version)"
@@ -66,6 +68,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
 
           New-Item -ItemType Directory -Force -Path "$env:PACKAGE_ROOT" | Out-Null
           New-Item -ItemType Directory -Force -Path "$env:PACKAGE_ROOT\python-runtime" | Out-Null
@@ -77,6 +80,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
 
           @"
           Pillow==11.3.0
@@ -84,7 +88,7 @@ jobs:
           pytest==8.3.3
           pytest-assume==2.4.3
           pytest-base-url==2.1.0
-          pytest-html==1.2.1
+          pytest-html==1.2
           pytest-metadata==3.1.1
           pytest-playwright==0.7.1
           pytest-playwright-snapshot==1.0
@@ -96,6 +100,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
 
           $pythonZip = "python-$env:PYTHON_VERSION-embed-amd64.zip"
           $pythonUrl = "https://www.python.org/ftp/python/$env:PYTHON_VERSION/$pythonZip"
@@ -127,6 +132,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
 
           & "$env:PYTHON_EXE" -m venv "$env:PACKAGE_ROOT\venv"
 
@@ -138,10 +144,11 @@ jobs:
           Write-Host "Installed packages:"
           Get-Content "$env:PACKAGE_ROOT\requirements.lock.txt"
 
-      - name: Download wheelhouse for offline reinstall/reference
+      - name: Download wheelhouse for offline reinstall and reference
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
 
           & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" -m pip download `
             --dest "$env:PACKAGE_ROOT\wheelhouse" `
@@ -154,14 +161,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
 
           $browserPath = (Resolve-Path "$env:PLAYWRIGHT_BROWSERS_DIR").Path
           $env:PLAYWRIGHT_BROWSERS_PATH = $browserPath
 
           Write-Host "PLAYWRIGHT_BROWSERS_PATH=$env:PLAYWRIGHT_BROWSERS_PATH"
 
-          # Only install Playwright-managed Chromium and ffmpeg.
-          # Do not install Firefox/WebKit.
           & "$env:PACKAGE_ROOT\venv\Scripts\python.exe" -m playwright install chromium ffmpeg
 
           Write-Host "Playwright installed browsers:"
@@ -189,6 +195,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
 
           @'
           param(
@@ -280,7 +287,7 @@ jobs:
               "pytest": "8.3.3",
               "pytest-assume": "2.4.3",
               "pytest-base-url": "2.1.0",
-              "pytest-html": "1.2.1",
+              "pytest-html": "1.2",
               "pytest-metadata": "3.1.1",
               "pytest-playwright": "0.7.1",
               "pytest-playwright-snapshot": "1.0",
@@ -391,7 +398,7 @@ jobs:
             - pytest==8.3.3
             - pytest-assume==2.4.3
             - pytest-base-url==2.1.0
-            - pytest-html==1.2.1
+            - pytest-html==1.2
             - pytest-metadata==3.1.1
             - pytest-playwright==0.7.1
             - pytest-playwright-snapshot==1.0
@@ -445,6 +452,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
 
           $root = (Resolve-Path "$env:PACKAGE_ROOT").Path
           $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $root "ms-playwright"
@@ -458,6 +466,7 @@ jobs:
           PACKAGE_NAME: ${{ inputs.package_name }}
         run: |
           $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
 
           $zipName = "$env:PACKAGE_NAME-py3913-playwright1550-win10-x64.zip"
 
