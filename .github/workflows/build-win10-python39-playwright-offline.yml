@@ -14,7 +14,7 @@ jobs:
     runs-on: windows-2022
 
     env:
-      PYTHON_VERSION: "3.9.18"
+      PYTHON_VERSION: "3.9.13"
       PLAYWRIGHT_VERSION: "1.55.0"
       EXPECTED_CHROMIUM_REVISION: "1187"
       EXPECTED_FFMPEG_REVISION: "1011"
@@ -22,7 +22,7 @@ jobs:
       PLAYWRIGHT_BROWSERS_DIR: "offline\\ms-playwright"
 
     steps:
-      - name: Install Python 3.9.18 from official installer
+      - name: Install Python 3.9.13 from official installer
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -92,7 +92,7 @@ jobs:
 
           Get-Content "$env:PACKAGE_ROOT\requirements.txt"
 
-      - name: Download Python 3.9.18 embeddable runtime
+      - name: Download Python 3.9.13 embeddable runtime
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -371,7 +371,7 @@ jobs:
           '@ | ForEach-Object { $_.TrimStart() } | Out-File -FilePath "$env:PACKAGE_ROOT\verify-offline.py" -Encoding utf8
 
           @"
-          Win10 Python 3.9.18 Playwright 1.55.0 Offline Package
+          Win10 Python 3.9.13 Playwright 1.55.0 Offline Package
           =====================================================
 
           Target:
@@ -380,7 +380,7 @@ jobs:
 
           Included:
           - Python virtual environment: venv\
-          - Python 3.9.18 embeddable runtime: python-runtime\
+          - Python 3.9.13 embeddable runtime: python-runtime\
           - Wheelhouse for offline reinstall/reference: wheelhouse\
           - Playwright browser binaries: ms-playwright\
             - Chromium only
