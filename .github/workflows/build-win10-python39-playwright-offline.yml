@@ -459,7 +459,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $zipName = "$env:PACKAGE_NAME-py3918-playwright1550-win10-x64.zip"
+          $zipName = "$env:PACKAGE_NAME-py3913-playwright1550-win10-x64.zip"
 
           if (Test-Path $zipName) {
             Remove-Item $zipName -Force
@@ -478,7 +478,7 @@ jobs:
       - name: Upload offline package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.package_name }}-py3918-playwright1550-win10-x64
+          name: ${{ inputs.package_name }}-py3913-playwright1550-win10-x64
           path: |
             ${{ env.ZIP_NAME }}
             ${{ env.ZIP_NAME }}.sha256
