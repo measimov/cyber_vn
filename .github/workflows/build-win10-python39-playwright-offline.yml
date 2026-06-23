@@ -162,9 +162,18 @@ jobs:
             -r "$env:PACKAGE_ROOT\requirements.txt"
 
           & "$env:PACKAGE_ROOT\python-runtime\python.exe" -c "import sys; print(sys.executable); print(sys.version); import site; print('site ok')"
-          & "$env:PACKAGE_ROOT\python-runtime\python.exe" -m pip --version
 
-          & "$env:PACKAGE_ROOT\python-runtime\python.exe" -m pip list --format=freeze | Out-File -FilePath "$env:PACKAGE_ROOT\requirements.lock.txt" -Encoding utf8
+          & "$env:PACKAGE_ROOT\python-runtime\python.exe" -c @"
+          import importlib.metadata as metadata
+          rows = []
+          for dist in metadata.distributions():
+              name = dist.metadata.get('Name')
+              version = dist.version
+              if name and version:
+                  rows.append((name.lower(), name, version))
+          for _, name, version in sorted(rows):
+              print(f'{name}=={version}')
+          "@ | Out-File -FilePath "$env:PACKAGE_ROOT\requirements.lock.txt" -Encoding utf8
 
           Write-Host "Installed packages in embedded runtime:"
           Get-Content "$env:PACKAGE_ROOT\requirements.lock.txt"
